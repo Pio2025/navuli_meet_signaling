@@ -122,6 +122,19 @@ function registerRoomHandlers(io, socket, rooms) {
   socket.on('mute-status', ({ isMuted }) => {
     socket.to(socket.meetingUuid).emit('peer-mute-status', { socketId: socket.id, isMuted });
   });
+
+  socket.on('end-meeting', () => {
+    if (socket.meetingUuid) {
+      socket.to(socket.meetingUuid).emit('meeting-ended');
+    }
+  });
+  
+  socket.on('cam-status', ({ isCamOff }) => {
+    if (socket.meetingUuid) {
+      socket.to(socket.meetingUuid).emit('peer-cam-status', { socketId: socket.id, isCamOff });
+    }
+  });
+
 }
 
 module.exports = { registerRoomHandlers };
