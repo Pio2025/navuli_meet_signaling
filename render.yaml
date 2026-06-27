@@ -8,6 +8,6 @@ services:
       - key: JWT_SECRET
         sync: false
       - key: ALLOWED_ORIGINS
-        value: https://your-navulimeet-domain.com
-      - key: PORT
-        value: 3001
+        value: https://meet.navulifiji.com
+      - key: NODE_ENV
+        value: production
