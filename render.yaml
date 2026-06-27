@@ -8,6 +8,6 @@ services:
       - key: JWT_SECRET
         sync: false
       - key: ALLOWED_ORIGINS
-        value: https://meet.navulifiji.com
+        value: https://meet.navulifiji.com,http://localhost
       - key: NODE_ENV
         value: production
