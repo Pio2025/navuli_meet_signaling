@@ -56,13 +56,15 @@ function registerRoomHandlers(io, socket, rooms) {
     console.log(`[room] ADMITTED      meeting=${socket.meetingUuid}  name="${info.displayName}"`);
     admittedSocket.join(socket.meetingUuid);
 
-    // Send existing peers to newly admitted
+    // Send existing peers (with SFU session info) to newly admitted participant
     const peers = rooms.getAdmitted(socket.meetingUuid)
       .filter(p => p.socketId !== socketId);
     admittedSocket.emit('admitted', { peers });
 
-    // Notify room of new peer
-    socket.to(socket.meetingUuid).emit('peer-joined', {
+    // Notify everyone in the room EXCEPT the newly admitted participant.
+    // Using io.to().except() ensures the HOST also receives peer-joined —
+    // socket.to() would exclude the host (the emit sender) which is the bug.
+    io.to(socket.meetingUuid).except(socketId).emit('peer-joined', {
       socketId,
       userId: info.userId,
       displayName: info.displayName,
@@ -82,7 +84,8 @@ function registerRoomHandlers(io, socket, rooms) {
       const peers = rooms.getAdmitted(socket.meetingUuid)
         .filter(p => p.socketId !== socketId);
       s.emit('admitted', { peers });
-      socket.to(socket.meetingUuid).emit('peer-joined', {
+      // Same fix: use io.to().except() so the host receives peer-joined
+      io.to(socket.meetingUuid).except(socketId).emit('peer-joined', {
         socketId, userId: info.userId, displayName: info.displayName,
       });
     });
