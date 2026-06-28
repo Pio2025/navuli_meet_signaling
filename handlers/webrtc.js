@@ -1,15 +1,20 @@
 function registerWebRTCHandlers(io, socket, rooms) {
 
-  socket.on('offer', ({ to, offer }) => {
-    io.to(to).emit('offer', { from: socket.id, offer });
-  });
+  // Called by a peer once it has connected to Cloudflare SFU and published tracks.
+  // We store the session info so late-joiners receive it in their 'admitted' payload,
+  // then broadcast to everyone already in the room so they can subscribe.
+  socket.on('sfu-session-ready', ({ sessionId, trackNames }) => {
+    if (!socket.meetingUuid) return;
 
-  socket.on('answer', ({ to, answer }) => {
-    io.to(to).emit('answer', { from: socket.id, answer });
-  });
+    rooms.setSfuSession(socket.meetingUuid, socket.id, sessionId, trackNames);
 
-  socket.on('ice-candidate', ({ to, candidate }) => {
-    io.to(to).emit('ice-candidate', { from: socket.id, candidate });
+    socket.to(socket.meetingUuid).emit('peer-sfu-ready', {
+      socketId: socket.id,
+      sessionId,
+      trackNames,
+    });
+
+    console.log(`[sfu] READY  meeting=${socket.meetingUuid}  socket=${socket.id}  session=${sessionId}`);
   });
 }
 

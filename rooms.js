@@ -43,6 +43,15 @@ function addAdmitted(meetingUuid, socketId, info) {
   room.admitted.set(socketId, info);
 }
 
+function setSfuSession(meetingUuid, socketId, sfuSessionId, sfuTrackNames) {
+  const room = getRoom(meetingUuid);
+  const info = room.admitted.get(socketId);
+  if (info) {
+    info.sfuSessionId   = sfuSessionId;
+    info.sfuTrackNames  = sfuTrackNames;
+  }
+}
+
 function getAdmitted(meetingUuid) {
   const room = getRoom(meetingUuid);
   return Array.from(room.admitted.entries()).map(([sid, info]) => ({ socketId: sid, ...info }));
@@ -81,4 +90,4 @@ function destroyRoom(meetingUuid) {
   delete state[meetingUuid];
 }
 
-module.exports = { getRoom, joinWaiting, admit, admitAll, addAdmitted, getAdmitted, getWaiting, remove, leaveAll, destroyRoom };
+module.exports = { getRoom, joinWaiting, admit, admitAll, addAdmitted, getAdmitted, getWaiting, remove, leaveAll, destroyRoom, setSfuSession };
