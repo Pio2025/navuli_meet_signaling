@@ -1,7 +1,7 @@
 function registerRoomHandlers(io, socket, rooms) {
 
-  socket.on('join-room', ({ meetingUuid, userId, displayName, isHost, waitingRoom }) => {
-    const info = { userId, displayName };
+  socket.on('join-room', ({ meetingUuid, userId, displayName, photoUrl, isHost, waitingRoom }) => {
+    const info = { userId, displayName, photoUrl: photoUrl || '' };
     socket.meetingUuid = meetingUuid;
 
     // Host always admitted directly
@@ -29,7 +29,7 @@ function registerRoomHandlers(io, socket, rooms) {
         const peers = rooms.getAdmitted(meetingUuid).filter(p => p.socketId !== socket.id);
         socket.emit('admitted', { peers });
         io.to(meetingUuid).except(socket.id).emit('peer-joined', {
-          socketId: socket.id, userId: info.userId, displayName: info.displayName,
+          socketId: socket.id, userId: info.userId, displayName: info.displayName, photoUrl: info.photoUrl,
         });
         const waiting = rooms.getWaiting(meetingUuid);
         socket.emit('waiting-room-update', { waiting });
@@ -56,6 +56,7 @@ function registerRoomHandlers(io, socket, rooms) {
         socketId: socket.id,
         userId: info.userId,
         displayName: info.displayName,
+        photoUrl: info.photoUrl,
       });
       console.log(`[room] JOINED        meeting=${meetingUuid}  name="${displayName}"  peers=${peers.length}`);
     }
@@ -83,6 +84,7 @@ function registerRoomHandlers(io, socket, rooms) {
       socketId,
       userId: info.userId,
       displayName: info.displayName,
+      photoUrl: info.photoUrl,
     });
 
     // Refresh waiting list for host
@@ -101,7 +103,7 @@ function registerRoomHandlers(io, socket, rooms) {
       s.emit('admitted', { peers });
       // Same fix: use io.to().except() so the host receives peer-joined
       io.to(socket.meetingUuid).except(socketId).emit('peer-joined', {
-        socketId, userId: info.userId, displayName: info.displayName,
+        socketId, userId: info.userId, displayName: info.displayName, photoUrl: info.photoUrl,
       });
     });
     socket.emit('waiting-room-update', { waiting: [] });
