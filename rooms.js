@@ -2,13 +2,18 @@
 
 const state = {};
 // state[meetingUuid] = {
-//   admitted:  Map<socketId, { userId, displayName, socket }>
-//   waiting:   Map<socketId, { userId, displayName }>
+//   admitted:       Map<socketId, { userId, displayName, sfuSessionId?, sfuTrackNames? }>
+//   waiting:        Map<socketId, { userId, displayName }>
+//   admittedUserIds: Set<string>  — logged-in userIds ever admitted (for fast reconnect)
 // }
 
 function getRoom(meetingUuid) {
   if (!state[meetingUuid]) {
-    state[meetingUuid] = { admitted: new Map(), waiting: new Map() };
+    state[meetingUuid] = {
+      admitted:        new Map(),
+      waiting:         new Map(),
+      admittedUserIds: new Set(),
+    };
   }
   return state[meetingUuid];
 }
@@ -24,6 +29,7 @@ function admit(meetingUuid, socketId) {
   if (!info) return null;
   room.waiting.delete(socketId);
   room.admitted.set(socketId, info);
+  if (info.userId && info.userId !== 0) room.admittedUserIds.add(String(info.userId));
   return info;
 }
 
@@ -32,6 +38,7 @@ function admitAll(meetingUuid) {
   const admitted = [];
   room.waiting.forEach((info, sid) => {
     room.admitted.set(sid, info);
+    if (info.userId && info.userId !== 0) room.admittedUserIds.add(String(info.userId));
     admitted.push({ socketId: sid, ...info });
   });
   room.waiting.clear();
@@ -41,6 +48,13 @@ function admitAll(meetingUuid) {
 function addAdmitted(meetingUuid, socketId, info) {
   const room = getRoom(meetingUuid);
   room.admitted.set(socketId, info);
+  if (info.userId && info.userId !== 0) room.admittedUserIds.add(String(info.userId));
+}
+
+function wasUserAdmitted(meetingUuid, userId) {
+  if (!userId || userId === 0 || userId === '0') return false;
+  const room = getRoom(meetingUuid);
+  return room.admittedUserIds.has(String(userId));
 }
 
 function setSfuSession(meetingUuid, socketId, sfuSessionId, sfuTrackNames) {
@@ -78,7 +92,7 @@ function leaveAll(socketId, callback) {
       room.admitted.delete(socketId);
       room.waiting.delete(socketId);
       callback(meetingUuid, info.displayName);
-      // Clean up empty rooms
+      // Clean up empty rooms (keep admittedUserIds alive until host ends meeting)
       if (room.admitted.size === 0 && room.waiting.size === 0) {
         delete state[meetingUuid];
       }
@@ -100,4 +114,8 @@ function destroyRoom(meetingUuid) {
   delete state[meetingUuid];
 }
 
-module.exports = { getRoom, joinWaiting, admit, admitAll, addAdmitted, getAdmitted, getWaiting, remove, leaveAll, destroyRoom, setSfuSession, dropToWaiting };
+module.exports = {
+  getRoom, joinWaiting, admit, admitAll, addAdmitted, getAdmitted,
+  getWaiting, remove, leaveAll, destroyRoom, setSfuSession,
+  dropToWaiting, wasUserAdmitted,
+};

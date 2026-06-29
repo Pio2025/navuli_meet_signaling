@@ -22,7 +22,22 @@ function registerRoomHandlers(io, socket, rooms) {
     }
 
     if (waitingRoom) {
-      // Waiting room enabled — hold participant until host admits them
+      // Reconnecting logged-in user who was previously admitted → skip waiting room
+      if (rooms.wasUserAdmitted(meetingUuid, userId)) {
+        rooms.addAdmitted(meetingUuid, socket.id, info);
+        socket.join(meetingUuid);
+        const peers = rooms.getAdmitted(meetingUuid).filter(p => p.socketId !== socket.id);
+        socket.emit('admitted', { peers });
+        io.to(meetingUuid).except(socket.id).emit('peer-joined', {
+          socketId: socket.id, userId: info.userId, displayName: info.displayName,
+        });
+        const waiting = rooms.getWaiting(meetingUuid);
+        socket.emit('waiting-room-update', { waiting });
+        console.log(`[room] RECONNECTED   meeting=${meetingUuid}  name="${displayName}"  peers=${peers.length}`);
+        return;
+      }
+
+      // New participant — hold in waiting room
       rooms.joinWaiting(meetingUuid, socket.id, info);
       const waiting = rooms.getWaiting(meetingUuid);
       socket.to(meetingUuid).emit('waiting-room-update', { waiting });

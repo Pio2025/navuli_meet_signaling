@@ -61,7 +61,10 @@ io.on('connection', (socket) => {
   socket.on('disconnect', (reason) => {
     console.log(`[-] Disconnected ${socket.id}  (${who}) — ${reason}`);
     rooms.leaveAll(socket.id, (meetingUuid, displayName) => {
-      socket.to(meetingUuid).emit('peer-left', {
+      // Use io.to().except() — socket.to() is unreliable here because Socket.IO
+      // calls socket.leaveAll() before firing the disconnect event, so the socket
+      // has already left its rooms and socket.to(room) finds no members.
+      io.to(meetingUuid).except(socket.id).emit('peer-left', {
         socketId: socket.id,
         displayName,
       });
