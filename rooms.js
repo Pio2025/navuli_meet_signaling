@@ -20,6 +20,15 @@ function getRoom(meetingUuid) {
 
 function joinWaiting(meetingUuid, socketId, info) {
   const room = getRoom(meetingUuid);
+  // Deduplicate: if a logged-in user already has an entry in waiting (different socketId),
+  // remove the old entry before adding the new one to prevent duplicate rows.
+  if (info.userId && info.userId !== 0 && info.userId !== '0') {
+    for (const [sid, entry] of room.waiting.entries()) {
+      if (String(entry.userId) === String(info.userId) && sid !== socketId) {
+        room.waiting.delete(sid);
+      }
+    }
+  }
   room.waiting.set(socketId, info);
 }
 
