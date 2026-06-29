@@ -86,8 +86,18 @@ function leaveAll(socketId, callback) {
   });
 }
 
+function dropToWaiting(meetingUuid, socketId) {
+  const room = getRoom(meetingUuid);
+  const info = room.admitted.get(socketId);
+  if (!info) return null;
+  room.admitted.delete(socketId);
+  // Strip SFU session so they get a fresh one if re-admitted
+  room.waiting.set(socketId, { userId: info.userId, displayName: info.displayName });
+  return info;
+}
+
 function destroyRoom(meetingUuid) {
   delete state[meetingUuid];
 }
 
-module.exports = { getRoom, joinWaiting, admit, admitAll, addAdmitted, getAdmitted, getWaiting, remove, leaveAll, destroyRoom, setSfuSession };
+module.exports = { getRoom, joinWaiting, admit, admitAll, addAdmitted, getAdmitted, getWaiting, remove, leaveAll, destroyRoom, setSfuSession, dropToWaiting };

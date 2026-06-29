@@ -92,14 +92,40 @@ function registerRoomHandlers(io, socket, rooms) {
     socket.emit('waiting-room-update', { waiting: [] });
   });
 
+  // Soft kick: move participant back to waiting room
+  socket.on('drop-to-waiting', ({ socketId }) => {
+    const info = rooms.dropToWaiting(socket.meetingUuid, socketId);
+    if (!info) return;
+
+    const s = io.sockets.sockets.get(socketId);
+    if (s) {
+      s.leave(socket.meetingUuid);
+      s.emit('dropped-to-waiting');
+    }
+
+    // Notify remaining room members
+    io.to(socket.meetingUuid).emit('peer-left', { socketId, displayName: info.displayName });
+
+    // Refresh waiting list for host
+    const waiting = rooms.getWaiting(socket.meetingUuid);
+    socket.emit('waiting-room-update', { waiting });
+
+    console.log(`[room] DROPPED       meeting=${socket.meetingUuid}  name="${info.displayName}"`);
+  });
+
+  // Hard remove: permanently eject participant
   socket.on('remove-participant', ({ socketId }) => {
+    const info = rooms.remove(socket.meetingUuid, socketId);
     const s = io.sockets.sockets.get(socketId);
     if (s) {
       s.emit('removed-from-meeting');
       s.leave(socket.meetingUuid);
     }
-    rooms.remove(socket.meetingUuid, socketId);
-    socket.to(socket.meetingUuid).emit('peer-left', { socketId, displayName: 'Participant' });
+    io.to(socket.meetingUuid).emit('peer-left', { socketId, displayName: info?.displayName || 'Participant' });
+
+    // Refresh waiting list in case they were in waiting
+    const waiting = rooms.getWaiting(socket.meetingUuid);
+    socket.emit('waiting-room-update', { waiting });
   });
 
   socket.on('mute-request', ({ to }) => {
