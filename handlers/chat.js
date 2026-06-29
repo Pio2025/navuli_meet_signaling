@@ -24,6 +24,24 @@ function registerChatHandlers(io, socket, rooms) {
     // Broadcast to others in the room
     socket.to(socket.meetingUuid).emit('chat-message', payload);
   });
+
+  socket.on('typing-start', () => {
+    if (!socket.meetingUuid) return;
+    const info = rooms.getAdmitted(socket.meetingUuid).find(p => p.socketId === socket.id);
+    socket.to(socket.meetingUuid).emit('peer-typing', {
+      socketId:   socket.id,
+      senderName: info?.displayName ?? 'Guest',
+      isTyping:   true,
+    });
+  });
+
+  socket.on('typing-stop', () => {
+    if (!socket.meetingUuid) return;
+    socket.to(socket.meetingUuid).emit('peer-typing', {
+      socketId: socket.id,
+      isTyping: false,
+    });
+  });
 }
 
 module.exports = { registerChatHandlers };
