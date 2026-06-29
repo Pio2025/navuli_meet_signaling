@@ -179,6 +179,18 @@ function registerRoomHandlers(io, socket, rooms) {
     }
   });
 
+  socket.on('raise-hand', () => {
+    if (socket.meetingUuid) {
+      socket.to(socket.meetingUuid).emit('peer-raise-hand', { socketId: socket.id });
+    }
+  });
+
+  socket.on('lower-hand', () => {
+    if (socket.meetingUuid) {
+      socket.to(socket.meetingUuid).emit('peer-lower-hand', { socketId: socket.id });
+    }
+  });
+
 }
 
 module.exports = { registerRoomHandlers };
