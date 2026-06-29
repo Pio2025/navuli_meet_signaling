@@ -1,8 +1,12 @@
 function registerChatHandlers(io, socket, rooms) {
 
-  socket.on('chat-message', ({ message }) => {
-    if (!socket.meetingUuid || !message?.trim()) return;
-    const safe = String(message).slice(0, 2000).replace(/<[^>]+>/g, '');
+  socket.on('chat-message', ({ message, fileUrl, fileName, fileType, fileSize }) => {
+    if (!socket.meetingUuid) return;
+    const hasText = message?.trim();
+    const hasFile = fileUrl?.trim();
+    if (!hasText && !hasFile) return;
+
+    const safe = hasText ? String(message).slice(0, 2000).replace(/<[^>]+>/g, '') : '';
     const info = rooms.getAdmitted(socket.meetingUuid)
       .find(p => p.socketId === socket.id);
 
@@ -11,6 +15,10 @@ function registerChatHandlers(io, socket, rooms) {
       senderName: info?.displayName ?? 'Guest',
       message:    safe,
       timestamp:  new Date().toISOString(),
+      fileUrl,
+      fileName,
+      fileType,
+      fileSize,
     };
 
     // Broadcast to others in the room
