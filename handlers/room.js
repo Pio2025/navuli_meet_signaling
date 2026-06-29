@@ -149,6 +149,24 @@ function registerRoomHandlers(io, socket, rooms) {
     io.to(to).emit('mute-request');
   });
 
+  socket.on('unmute-request', ({ to }) => {
+    io.to(to).emit('unmute-request');
+  });
+
+  socket.on('poll-create', ({ pollId, question, options }) => {
+    if (!socket.meetingUuid) return;
+    const info = rooms.getAdmitted(socket.meetingUuid).find(p => p.socketId === socket.id);
+    socket.to(socket.meetingUuid).emit('poll-created', {
+      pollId, question, options,
+      creatorName: info?.displayName || 'Participant',
+    });
+  });
+
+  socket.on('poll-vote', ({ pollId, optionIndex }) => {
+    if (!socket.meetingUuid) return;
+    socket.to(socket.meetingUuid).emit('poll-vote-update', { pollId, optionIndex });
+  });
+
   socket.on('screen-share-start', (data) => {
     socket.to(socket.meetingUuid).emit('screen-share-start', { socketId: socket.id, ...data });
   });
