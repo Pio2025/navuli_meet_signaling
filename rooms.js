@@ -13,6 +13,9 @@ function getRoom(meetingUuid) {
       admitted:        new Map(),
       waiting:         new Map(),
       admittedUserIds: new Set(),
+      locked:          false,
+      cohostSocketIds: new Set(),
+      cohostUserIds:   new Set(),
     };
   }
   return state[meetingUuid];
@@ -123,8 +126,45 @@ function destroyRoom(meetingUuid) {
   delete state[meetingUuid];
 }
 
+function isLocked(meetingUuid) {
+  return state[meetingUuid]?.locked ?? false;
+}
+
+function setLocked(meetingUuid, locked) {
+  const room = getRoom(meetingUuid);
+  room.locked = locked;
+}
+
+function addCoHost(meetingUuid, socketId) {
+  const room = getRoom(meetingUuid);
+  room.cohostSocketIds.add(socketId);
+  const info = room.admitted.get(socketId);
+  if (info?.userId && info.userId !== 0 && info.userId !== '0') {
+    room.cohostUserIds.add(String(info.userId));
+  }
+}
+
+function removeCoHost(meetingUuid, socketId) {
+  const room = getRoom(meetingUuid);
+  room.cohostSocketIds.delete(socketId);
+}
+
+function isCoHost(meetingUuid, socketId) {
+  return state[meetingUuid]?.cohostSocketIds.has(socketId) ?? false;
+}
+
+function isCoHostUser(meetingUuid, userId) {
+  if (!userId || userId === 0 || userId === '0') return false;
+  return state[meetingUuid]?.cohostUserIds.has(String(userId)) ?? false;
+}
+
+function getCoHosts(meetingUuid) {
+  return Array.from(state[meetingUuid]?.cohostSocketIds ?? []);
+}
+
 module.exports = {
   getRoom, joinWaiting, admit, admitAll, addAdmitted, getAdmitted,
   getWaiting, remove, leaveAll, destroyRoom, setSfuSession,
   dropToWaiting, wasUserAdmitted,
+  isLocked, setLocked, addCoHost, removeCoHost, isCoHost, isCoHostUser, getCoHosts,
 };

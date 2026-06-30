@@ -1,8 +1,30 @@
 function registerRoomHandlers(io, socket, rooms) {
 
-  socket.on('join-room', ({ meetingUuid, userId, displayName, photoUrl, isHost, waitingRoom }) => {
+  socket.on('join-room', ({ meetingUuid, userId, displayName, photoUrl, isHost, waitingRoom, maxParticipants }) => {
     const info = { userId, displayName, photoUrl: photoUrl || '' };
     socket.meetingUuid = meetingUuid;
+
+    // Enforce participant capacity (host is always allowed in)
+    if (!isHost) {
+      const limit   = Math.min(Math.max(parseInt(maxParticipants) || 300, 2), 500);
+      const current = rooms.getAdmitted(meetingUuid).length + rooms.getWaiting(meetingUuid).length;
+      if (current >= limit) {
+        socket.emit('meeting-full', { limit });
+        console.log(`[room] FULL          meeting=${meetingUuid}  limit=${limit}  current=${current}  name="${displayName}"`);
+        return;
+      }
+    }
+
+    // Lock check — block new participants; reconnects and co-host userIds are exempt
+    if (!isHost && rooms.isLocked(meetingUuid)) {
+      const wasAdmitted = userId && rooms.wasUserAdmitted(meetingUuid, userId);
+      const isCoHostU   = userId && rooms.isCoHostUser(meetingUuid, userId);
+      if (!wasAdmitted && !isCoHostU) {
+        socket.emit('meeting-locked');
+        console.log(`[room] LOCKED        meeting=${meetingUuid}  name="${displayName}"`);
+        return;
+      }
+    }
 
     // Host always admitted directly
     if (isHost) {
@@ -12,6 +34,7 @@ function registerRoomHandlers(io, socket, rooms) {
       const peers = rooms.getAdmitted(meetingUuid)
         .filter(p => p.socketId !== socket.id);
       socket.emit('admitted', { peers });
+      socket.emit('meeting-lock-status', { locked: rooms.isLocked(meetingUuid) });
 
       // Send current waiting list to host
       const waiting = rooms.getWaiting(meetingUuid);
@@ -28,6 +51,7 @@ function registerRoomHandlers(io, socket, rooms) {
         socket.join(meetingUuid);
         const peers = rooms.getAdmitted(meetingUuid).filter(p => p.socketId !== socket.id);
         socket.emit('admitted', { peers });
+        socket.emit('meeting-lock-status', { locked: rooms.isLocked(meetingUuid) });
         io.to(meetingUuid).except(socket.id).emit('peer-joined', {
           socketId: socket.id, userId: info.userId, displayName: info.displayName, photoUrl: info.photoUrl,
         });
@@ -51,6 +75,7 @@ function registerRoomHandlers(io, socket, rooms) {
       const peers = rooms.getAdmitted(meetingUuid)
         .filter(p => p.socketId !== socket.id);
       socket.emit('admitted', { peers });
+      socket.emit('meeting-lock-status', { locked: rooms.isLocked(meetingUuid) });
 
       socket.to(meetingUuid).emit('peer-joined', {
         socketId: socket.id,
@@ -76,6 +101,7 @@ function registerRoomHandlers(io, socket, rooms) {
     const peers = rooms.getAdmitted(socket.meetingUuid)
       .filter(p => p.socketId !== socketId);
     admittedSocket.emit('admitted', { peers });
+    admittedSocket.emit('meeting-lock-status', { locked: rooms.isLocked(socket.meetingUuid) });
 
     // Notify everyone in the room EXCEPT the newly admitted participant.
     // Using io.to().except() ensures the HOST also receives peer-joined —
@@ -101,6 +127,7 @@ function registerRoomHandlers(io, socket, rooms) {
       const peers = rooms.getAdmitted(socket.meetingUuid)
         .filter(p => p.socketId !== socketId);
       s.emit('admitted', { peers });
+      s.emit('meeting-lock-status', { locked: rooms.isLocked(socket.meetingUuid) });
       // Same fix: use io.to().except() so the host receives peer-joined
       io.to(socket.meetingUuid).except(socketId).emit('peer-joined', {
         socketId, userId: info.userId, displayName: info.displayName, photoUrl: info.photoUrl,
@@ -209,6 +236,43 @@ function registerRoomHandlers(io, socket, rooms) {
     if (socket.meetingUuid) {
       socket.to(socket.meetingUuid).emit('peer-lower-hand', { socketId: socket.id });
     }
+  });
+
+  socket.on('lock-meeting', () => {
+    if (!socket.meetingUuid) return;
+    rooms.setLocked(socket.meetingUuid, true);
+    io.to(socket.meetingUuid).emit('meeting-lock-status', { locked: true });
+    console.log(`[room] LOCK ON       meeting=${socket.meetingUuid}`);
+  });
+
+  socket.on('unlock-meeting', () => {
+    if (!socket.meetingUuid) return;
+    rooms.setLocked(socket.meetingUuid, false);
+    io.to(socket.meetingUuid).emit('meeting-lock-status', { locked: false });
+    console.log(`[room] LOCK OFF      meeting=${socket.meetingUuid}`);
+  });
+
+  socket.on('assign-cohost', ({ socketId }) => {
+    if (!socket.meetingUuid) return;
+    rooms.addCoHost(socket.meetingUuid, socketId);
+    io.to(socketId).emit('you-are-cohost');
+    io.to(socket.meetingUuid).emit('cohost-assigned', { socketId });
+    const peer = rooms.getAdmitted(socket.meetingUuid).find(p => p.socketId === socketId);
+    console.log(`[room] COHOST+       meeting=${socket.meetingUuid}  name="${peer?.displayName}"`);
+  });
+
+  socket.on('revoke-cohost', ({ socketId }) => {
+    if (!socket.meetingUuid) return;
+    rooms.removeCoHost(socket.meetingUuid, socketId);
+    io.to(socketId).emit('cohost-revoked-self');
+    io.to(socket.meetingUuid).emit('cohost-revoked', { socketId });
+    console.log(`[room] COHOST-       meeting=${socket.meetingUuid}  socketId=${socketId}`);
+  });
+
+  // Relay transcript segments to all other participants in the room
+  socket.on('transcript-segment', ({ speaker, text }) => {
+    if (!socket.meetingUuid) return;
+    socket.to(socket.meetingUuid).emit('remote-transcript-segment', { speaker, text });
   });
 
 }
