@@ -8,6 +8,7 @@ const { registerRoomHandlers } = require('./handlers/room');
 const { registerWebRTCHandlers } = require('./handlers/webrtc');
 const { registerChatHandlers } = require('./handlers/chat');
 const { registerWhiteboardHandlers } = require('./handlers/whiteboard');
+const { registerWorkspaceHandlers }  = require('./handlers/workspace');
 const rooms = require('./rooms');
 
 const app    = express();
@@ -59,6 +60,7 @@ io.on('connection', (socket) => {
   registerWebRTCHandlers(io, socket, rooms);
   registerChatHandlers(io, socket, rooms);
   registerWhiteboardHandlers(io, socket, rooms);
+  registerWorkspaceHandlers(io, socket);
 
   socket.on('disconnect', (reason) => {
     console.log(`[-] Disconnected ${socket.id}  (${who}) — ${reason}`);
