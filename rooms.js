@@ -16,6 +16,11 @@ function getRoom(meetingUuid) {
       locked:          false,
       cohostSocketIds: new Set(),
       cohostUserIds:   new Set(),
+      // Breakout rooms
+      breakoutRooms:   {},           // roomKey → { name, participants: Set<socketId> }
+      inBreakout:      new Map(),    // socketId → roomKey
+      // Whiteboard
+      wbStrokes:       [],           // stroke history (max 1 000)
     };
   }
   return state[meetingUuid];
@@ -162,9 +167,89 @@ function getCoHosts(meetingUuid) {
   return Array.from(state[meetingUuid]?.cohostSocketIds ?? []);
 }
 
+// ── Breakout Rooms ─────────────────────────────────────────────────────────
+
+function setBreakoutRoom(meetingUuid, roomKey, name, socketIds) {
+  const room = getRoom(meetingUuid);
+  room.breakoutRooms[roomKey] = { name, participants: new Set(socketIds) };
+  socketIds.forEach(sid => room.inBreakout.set(sid, roomKey));
+}
+
+function assignToBreakout(meetingUuid, socketId, roomKey) {
+  const room = getRoom(meetingUuid);
+  room.inBreakout.set(socketId, roomKey);
+  if (room.breakoutRooms[roomKey]) {
+    room.breakoutRooms[roomKey].participants.add(socketId);
+  }
+}
+
+function getBreakoutKey(meetingUuid, socketId) {
+  return state[meetingUuid]?.inBreakout.get(socketId) ?? null;
+}
+
+function getBreakoutRoomParticipants(meetingUuid, roomKey) {
+  const br = state[meetingUuid]?.breakoutRooms[roomKey];
+  return br ? Array.from(br.participants) : [];
+}
+
+function getAllBreakoutParticipants(meetingUuid) {
+  const room = state[meetingUuid];
+  if (!room) return [];
+  const result = [];
+  room.inBreakout.forEach((roomKey, socketId) => result.push({ socketId, roomKey }));
+  return result;
+}
+
+function leaveBreakout(meetingUuid, socketId) {
+  const room = state[meetingUuid];
+  if (!room) return;
+  const key = room.inBreakout.get(socketId);
+  if (key && room.breakoutRooms[key]) {
+    room.breakoutRooms[key].participants.delete(socketId);
+  }
+  room.inBreakout.delete(socketId);
+}
+
+function clearAllBreakouts(meetingUuid) {
+  const room = state[meetingUuid];
+  if (!room) return;
+  room.inBreakout.clear();
+  room.breakoutRooms = {};
+}
+
+function hasActiveBreakouts(meetingUuid) {
+  return (state[meetingUuid]?.inBreakout.size ?? 0) > 0;
+}
+
+// ── Whiteboard ─────────────────────────────────────────────────────────────
+
+const WB_MAX_STROKES = 1000;
+
+function addWbStroke(meetingUuid, stroke) {
+  const room = getRoom(meetingUuid);
+  room.wbStrokes.push(stroke);
+  if (room.wbStrokes.length > WB_MAX_STROKES) {
+    room.wbStrokes = room.wbStrokes.slice(-WB_MAX_STROKES);
+  }
+}
+
+function getWbStrokes(meetingUuid) {
+  return state[meetingUuid]?.wbStrokes ?? [];
+}
+
+function clearWbStrokes(meetingUuid) {
+  const room = state[meetingUuid];
+  if (room) room.wbStrokes = [];
+}
+
 module.exports = {
   getRoom, joinWaiting, admit, admitAll, addAdmitted, getAdmitted,
   getWaiting, remove, leaveAll, destroyRoom, setSfuSession,
   dropToWaiting, wasUserAdmitted,
   isLocked, setLocked, addCoHost, removeCoHost, isCoHost, isCoHostUser, getCoHosts,
+  // Breakout
+  setBreakoutRoom, assignToBreakout, getBreakoutKey, getBreakoutRoomParticipants,
+  getAllBreakoutParticipants, leaveBreakout, clearAllBreakouts, hasActiveBreakouts,
+  // Whiteboard
+  addWbStroke, getWbStrokes, clearWbStrokes,
 };

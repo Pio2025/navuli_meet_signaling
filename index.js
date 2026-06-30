@@ -7,6 +7,7 @@ const { verifyToken } = require('./middleware/auth');
 const { registerRoomHandlers } = require('./handlers/room');
 const { registerWebRTCHandlers } = require('./handlers/webrtc');
 const { registerChatHandlers } = require('./handlers/chat');
+const { registerWhiteboardHandlers } = require('./handlers/whiteboard');
 const rooms = require('./rooms');
 
 const app    = express();
@@ -57,6 +58,7 @@ io.on('connection', (socket) => {
   registerRoomHandlers(io, socket, rooms);
   registerWebRTCHandlers(io, socket, rooms);
   registerChatHandlers(io, socket, rooms);
+  registerWhiteboardHandlers(io, socket, rooms);
 
   socket.on('disconnect', (reason) => {
     console.log(`[-] Disconnected ${socket.id}  (${who}) — ${reason}`);

@@ -2,7 +2,8 @@ function registerRoomHandlers(io, socket, rooms) {
 
   socket.on('join-room', ({ meetingUuid, userId, displayName, photoUrl, isHost, waitingRoom, maxParticipants }) => {
     const info = { userId, displayName, photoUrl: photoUrl || '' };
-    socket.meetingUuid = meetingUuid;
+    socket.meetingUuid  = meetingUuid;
+    socket.currentRoom  = meetingUuid;  // updated when entering a breakout
 
     // Enforce participant capacity (host is always allowed in)
     if (!isHost) {
@@ -273,6 +274,145 @@ function registerRoomHandlers(io, socket, rooms) {
   socket.on('transcript-segment', ({ speaker, text }) => {
     if (!socket.meetingUuid) return;
     socket.to(socket.meetingUuid).emit('remote-transcript-segment', { speaker, text });
+  });
+
+  // ── Breakout Rooms ────────────────────────────────────────────────────────
+
+  // Host opens breakout rooms: brRooms = [{ name, socketIds: [] }, …]
+  socket.on('open-breakout-rooms', ({ rooms: brRooms }) => {
+    if (!socket.meetingUuid) return;
+    const uuid = socket.meetingUuid;
+
+    const summary = [];
+
+    brRooms.forEach((br, idx) => {
+      const roomKey = `br${idx}`;
+      const roomId  = `${uuid}:${roomKey}`;
+
+      rooms.setBreakoutRoom(uuid, roomKey, br.name, br.socketIds);
+
+      // Build peer list for this breakout (with SFU session data)
+      const brPeers = br.socketIds.map(sid => {
+        const peer = rooms.getAdmitted(uuid).find(p => p.socketId === sid);
+        return peer ? { socketId: sid, ...peer } : null;
+      }).filter(Boolean);
+
+      br.socketIds.forEach(sid => {
+        const s = io.sockets.sockets.get(sid);
+        if (!s) return;
+
+        s.leave(uuid);
+        s.join(roomId);
+        s.currentRoom = roomId;
+
+        const peers = brPeers.filter(p => p.socketId !== sid);
+        s.emit('assigned-to-breakout', { roomKey, roomId, roomName: br.name, peers });
+      });
+
+      summary.push({ roomKey, roomId, name: br.name, count: br.socketIds.length });
+      console.log(`[room] BR-OPEN   meeting=${uuid}  room=${roomId}  n=${br.socketIds.length}`);
+    });
+
+    socket.emit('breakout-rooms-opened', { rooms: summary });
+  });
+
+  // Host ends all breakout rooms — return everyone to main
+  socket.on('end-breakout-rooms', () => {
+    if (!socket.meetingUuid) return;
+    const uuid = socket.meetingUuid;
+
+    const all = rooms.getAllBreakoutParticipants(uuid);
+    const mainPeers = rooms.getAdmitted(uuid);
+
+    all.forEach(({ socketId, roomKey }) => {
+      const s = io.sockets.sockets.get(socketId);
+      if (!s) return;
+
+      const roomId = `${uuid}:${roomKey}`;
+      s.leave(roomId);
+      s.join(uuid);
+      s.currentRoom = uuid;
+
+      const peers = mainPeers.filter(p => p.socketId !== socketId);
+      s.emit('returned-to-main', { peers });
+    });
+
+    rooms.clearAllBreakouts(uuid);
+    socket.emit('breakout-rooms-ended');
+    io.to(uuid).emit('breakout-rooms-ended');
+    console.log(`[room] BR-END    meeting=${uuid}  returned=${all.length}`);
+  });
+
+  // Participant voluntarily returns to main session
+  socket.on('return-from-breakout', () => {
+    if (!socket.meetingUuid) return;
+    const uuid    = socket.meetingUuid;
+    const roomKey = rooms.getBreakoutKey(uuid, socket.id);
+    if (!roomKey) return;
+
+    const roomId = `${uuid}:${roomKey}`;
+    socket.leave(roomId);
+    socket.join(uuid);
+    socket.currentRoom = uuid;
+    rooms.leaveBreakout(uuid, socket.id);
+
+    const peers = rooms.getAdmitted(uuid).filter(p => p.socketId !== socket.id);
+    socket.emit('returned-to-main', { peers });
+    console.log(`[room] BR-RETURN meeting=${uuid}  socket=${socket.id}`);
+  });
+
+  // Host broadcasts a text message to all breakout rooms + main
+  socket.on('broadcast-to-breakouts', ({ message }) => {
+    if (!socket.meetingUuid) return;
+    const uuid = socket.meetingUuid;
+
+    io.to(uuid).emit('host-broadcast', { message });
+
+    const sent = new Set();
+    rooms.getAllBreakoutParticipants(uuid).forEach(({ roomKey }) => {
+      const roomId = `${uuid}:${roomKey}`;
+      if (!sent.has(roomId)) {
+        io.to(roomId).emit('host-broadcast', { message });
+        sent.add(roomId);
+      }
+    });
+    console.log(`[room] BR-BCAST  meeting=${uuid}  msg="${message.slice(0,40)}"`);
+  });
+
+  // Host joins a specific breakout room to observe
+  socket.on('join-breakout-to-observe', ({ roomKey }) => {
+    if (!socket.meetingUuid) return;
+    const uuid   = socket.meetingUuid;
+    const roomId = `${uuid}:${roomKey}`;
+
+    socket.leave(uuid);
+    socket.join(roomId);
+    socket.currentRoom = roomId;
+
+    const peerIds = rooms.getBreakoutRoomParticipants(uuid, roomKey);
+    const peers   = peerIds.map(sid => {
+      const p = rooms.getAdmitted(uuid).find(a => a.socketId === sid);
+      return p ? { socketId: sid, ...p } : null;
+    }).filter(Boolean);
+
+    socket.emit('joined-breakout-to-observe', { roomKey, roomId, peers });
+    console.log(`[room] BR-OBSERVE meeting=${uuid}  room=${roomId}`);
+  });
+
+  // Host leaves the observed breakout room and returns to main
+  socket.on('leave-observed-breakout', () => {
+    if (!socket.meetingUuid) return;
+    const uuid = socket.meetingUuid;
+    const cur  = socket.currentRoom;
+
+    if (cur && cur !== uuid) {
+      socket.leave(cur);
+      socket.join(uuid);
+      socket.currentRoom = uuid;
+    }
+
+    const peers = rooms.getAdmitted(uuid).filter(p => p.socketId !== socket.id);
+    socket.emit('returned-to-main', { peers });
   });
 
 }

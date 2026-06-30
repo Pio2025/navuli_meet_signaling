@@ -8,13 +8,16 @@ function registerWebRTCHandlers(io, socket, rooms) {
 
     rooms.setSfuSession(socket.meetingUuid, socket.id, sessionId, trackNames);
 
-    socket.to(socket.meetingUuid).emit('peer-sfu-ready', {
+    // Use currentRoom so peers inside a breakout only hear from their own room.
+    // Falls back to meetingUuid when not in a breakout.
+    const targetRoom = socket.currentRoom || socket.meetingUuid;
+    socket.to(targetRoom).emit('peer-sfu-ready', {
       socketId: socket.id,
       sessionId,
       trackNames,
     });
 
-    console.log(`[sfu] READY  meeting=${socket.meetingUuid}  socket=${socket.id}  session=${sessionId}`);
+    console.log(`[sfu] READY  meeting=${socket.meetingUuid}  room=${targetRoom}  socket=${socket.id}  session=${sessionId}`);
   });
 }
 
