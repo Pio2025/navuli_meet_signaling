@@ -133,7 +133,9 @@ function registerRoomHandlers(io, socket, rooms) {
       io.to(socket.meetingUuid).except(socketId).emit('peer-joined', {
         socketId, userId: info.userId, displayName: info.displayName, photoUrl: info.photoUrl,
       });
+      console.log(`[room] ADMITTED      meeting=${socket.meetingUuid}  name="${info.displayName}" (admit-all)`);
     });
+    console.log(`[room] ADMIT-ALL     meeting=${socket.meetingUuid}  count=${admitted.length}`);
     socket.emit('waiting-room-update', { waiting: [] });
   });
 
@@ -171,6 +173,8 @@ function registerRoomHandlers(io, socket, rooms) {
     // Refresh waiting list in case they were in waiting
     const waiting = rooms.getWaiting(socket.meetingUuid);
     socket.emit('waiting-room-update', { waiting });
+
+    console.log(`[room] REMOVED       meeting=${socket.meetingUuid}  name="${info?.displayName || 'Participant'}"`);
   });
 
   socket.on('mute-request', ({ to }) => {
