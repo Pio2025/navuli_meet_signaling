@@ -1,3 +1,5 @@
+const backendApi = require('../services/backendApi');
+
 function registerChatHandlers(io, socket, rooms) {
 
   socket.on('chat-message', ({ message, fileUrl, fileName, fileType, fileSize }) => {
@@ -23,6 +25,15 @@ function registerChatHandlers(io, socket, rooms) {
 
     // Broadcast to others in the room
     socket.to(socket.meetingUuid).emit('chat-message', payload);
+
+    // Persist to the DB (fire-and-forget — must not block the live broadcast)
+    backendApi.sendChat(socket.handshake.auth?.token, socket.meetingUuid, {
+      message: safe,
+      attachment_url: hasFile ? fileUrl : undefined,
+      attachment_name: hasFile ? fileName : undefined,
+      attachment_mime: hasFile ? fileType : undefined,
+      attachment_size: hasFile ? fileSize : undefined,
+    });
   });
 
   socket.on('typing-start', () => {

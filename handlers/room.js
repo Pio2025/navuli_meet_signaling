@@ -1,3 +1,5 @@
+const backendApi = require('../services/backendApi');
+
 function registerRoomHandlers(io, socket, rooms) {
 
   socket.on('join-room', ({ meetingUuid, userId, displayName, photoUrl, isHost, waitingRoom, maxParticipants }) => {
@@ -95,6 +97,9 @@ function registerRoomHandlers(io, socket, rooms) {
     const admittedSocket = io.sockets.sockets.get(socketId);
     if (!admittedSocket) return;
 
+    const target = backendApi.identityBody(admittedSocket.user);
+    if (target) backendApi.admit(socket.handshake.auth?.token, socket.meetingUuid, target);
+
     console.log(`[room] ADMITTED      meeting=${socket.meetingUuid}  name="${info.displayName}"`);
     admittedSocket.join(socket.meetingUuid);
 
@@ -121,6 +126,7 @@ function registerRoomHandlers(io, socket, rooms) {
 
   socket.on('admit-all', () => {
     const admitted = rooms.admitAll(socket.meetingUuid);
+    backendApi.admitAll(socket.handshake.auth?.token, socket.meetingUuid);
     admitted.forEach(({ socketId, ...info }) => {
       const s = io.sockets.sockets.get(socketId);
       if (!s) return;
@@ -145,6 +151,9 @@ function registerRoomHandlers(io, socket, rooms) {
     if (!info) return;
 
     const s = io.sockets.sockets.get(socketId);
+    const target = backendApi.identityBody(s?.user);
+    if (target) backendApi.dropToWaiting(socket.handshake.auth?.token, socket.meetingUuid, target);
+
     if (s) {
       s.leave(socket.meetingUuid);
       s.emit('dropped-to-waiting');
@@ -164,6 +173,10 @@ function registerRoomHandlers(io, socket, rooms) {
   socket.on('remove-participant', ({ socketId }) => {
     const info = rooms.remove(socket.meetingUuid, socketId);
     const s = io.sockets.sockets.get(socketId);
+
+    const target = backendApi.identityBody(s?.user);
+    if (target) backendApi.remove(socket.handshake.auth?.token, socket.meetingUuid, target);
+
     if (s) {
       s.emit('removed-from-meeting');
       s.leave(socket.meetingUuid);
@@ -217,6 +230,10 @@ function registerRoomHandlers(io, socket, rooms) {
 
   socket.on('mute-status', ({ isMuted }) => {
     socket.to(socket.meetingUuid).emit('peer-mute-status', { socketId: socket.id, isMuted });
+    if (socket.meetingUuid) {
+      const target = backendApi.identityBody(socket.user);
+      if (target) backendApi.setMute(socket.handshake.auth?.token, socket.meetingUuid, target, isMuted);
+    }
   });
 
   socket.on('end-meeting', () => {
@@ -228,6 +245,8 @@ function registerRoomHandlers(io, socket, rooms) {
   socket.on('cam-status', ({ isCamOff }) => {
     if (socket.meetingUuid) {
       socket.to(socket.meetingUuid).emit('peer-cam-status', { socketId: socket.id, isCamOff });
+      const target = backendApi.identityBody(socket.user);
+      if (target) backendApi.setVideo(socket.handshake.auth?.token, socket.meetingUuid, target, isCamOff);
     }
   });
 

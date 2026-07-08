@@ -10,6 +10,7 @@ const { registerChatHandlers } = require('./handlers/chat');
 const { registerWhiteboardHandlers } = require('./handlers/whiteboard');
 const { registerWorkspaceHandlers }  = require('./handlers/workspace');
 const rooms = require('./rooms');
+const backendApi = require('./services/backendApi');
 
 const app    = express();
 const server = http.createServer(app);
@@ -64,6 +65,9 @@ io.on('connection', (socket) => {
 
   socket.on('disconnect', (reason) => {
     console.log(`[-] Disconnected ${socket.id}  (${who}) — ${reason}`);
+    if (socket.meetingUuid) {
+      backendApi.leave(socket.handshake.auth?.token, socket.meetingUuid);
+    }
     rooms.leaveAll(socket.id, (meetingUuid, displayName) => {
       // Use io.to().except() — socket.to() is unreliable here because Socket.IO
       // calls socket.leaveAll() before firing the disconnect event, so the socket
