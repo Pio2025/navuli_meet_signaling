@@ -13,6 +13,7 @@ function getRoom(meetingUuid) {
       admitted:        new Map(),
       waiting:         new Map(),
       admittedUserIds: new Set(),
+      hostSocketId:    null,
       locked:          false,
       cohostSocketIds: new Set(),
       cohostUserIds:   new Set(),
@@ -74,6 +75,38 @@ function wasUserAdmitted(meetingUuid, userId) {
   return room.admittedUserIds.has(String(userId));
 }
 
+// True if `userId` currently has a live admitted connection under a
+// different socket — used to stop a second simultaneous device/tab for the
+// same account from riding the "reconnect" shortcut past the waiting room.
+function hasLiveAdmittedUser(meetingUuid, userId, excludeSocketId) {
+  if (!userId || userId === 0 || userId === '0') return false;
+  const room = state[meetingUuid];
+  if (!room) return false;
+  for (const [sid, info] of room.admitted.entries()) {
+    if (sid !== excludeSocketId && String(info.userId) === String(userId)) return true;
+  }
+  return false;
+}
+
+// Tracks which single socket currently holds the live "host" slot for a
+// meeting, so only the session that actually started/owns the meeting is
+// ever granted host privileges — a second device on the same account joining
+// while that session is still connected must fall through to the normal
+// participant/waiting-room path instead.
+function getHostSocketId(meetingUuid) {
+  return state[meetingUuid]?.hostSocketId ?? null;
+}
+
+function setHostSocketId(meetingUuid, socketId) {
+  const room = getRoom(meetingUuid);
+  room.hostSocketId = socketId;
+}
+
+function clearHostSocketId(meetingUuid, socketId) {
+  const room = state[meetingUuid];
+  if (room && room.hostSocketId === socketId) room.hostSocketId = null;
+}
+
 function setSfuSession(meetingUuid, socketId, sfuSessionId, sfuTrackNames) {
   const room = getRoom(meetingUuid);
   const info = room.admitted.get(socketId);
@@ -98,6 +131,7 @@ function remove(meetingUuid, socketId) {
   const info = room.admitted.get(socketId) || room.waiting.get(socketId);
   room.admitted.delete(socketId);
   room.waiting.delete(socketId);
+  if (room.hostSocketId === socketId) room.hostSocketId = null;
   return info;
 }
 
@@ -108,6 +142,7 @@ function leaveAll(socketId, callback) {
     if (info) {
       room.admitted.delete(socketId);
       room.waiting.delete(socketId);
+      if (room.hostSocketId === socketId) room.hostSocketId = null;
       callback(meetingUuid, info.displayName);
       // Clean up empty rooms (keep admittedUserIds alive until host ends meeting)
       if (room.admitted.size === 0 && room.waiting.size === 0) {
@@ -245,7 +280,8 @@ function clearWbStrokes(meetingUuid) {
 module.exports = {
   getRoom, joinWaiting, admit, admitAll, addAdmitted, getAdmitted,
   getWaiting, remove, leaveAll, destroyRoom, setSfuSession,
-  dropToWaiting, wasUserAdmitted,
+  dropToWaiting, wasUserAdmitted, hasLiveAdmittedUser,
+  getHostSocketId, setHostSocketId, clearHostSocketId,
   isLocked, setLocked, addCoHost, removeCoHost, isCoHost, isCoHostUser, getCoHosts,
   // Breakout
   setBreakoutRoom, assignToBreakout, getBreakoutKey, getBreakoutRoomParticipants,

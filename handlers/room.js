@@ -7,8 +7,26 @@ function registerRoomHandlers(io, socket, rooms) {
     socket.meetingUuid  = meetingUuid;
     socket.currentRoom  = meetingUuid;  // updated when entering a breakout
 
+    // A client's `isHost` claim (computed statically server-side from
+    // user_id == host_user_id, with no live-connection awareness) is only
+    // honored while no OTHER connection currently holds the live host slot
+    // for this meeting. This is what stops the meeting owner's own account,
+    // opened from a second device/tab while already hosting elsewhere, from
+    // being granted host privileges a second time — that connection instead
+    // falls through to the normal participant/waiting-room path below.
+    const liveHostSocketId = rooms.getHostSocketId(meetingUuid);
+    const hostSlotTaken = !!liveHostSocketId
+      && liveHostSocketId !== socket.id
+      && io.sockets.sockets.has(liveHostSocketId);
+    const grantHost = isHost && !hostSlotTaken;
+
+    if (isHost && !grantHost) {
+      socket.emit('host-denied');
+      console.log(`[room] HOST-DENIED   meeting=${meetingUuid}  name="${displayName}" — a live host session already exists`);
+    }
+
     // Enforce participant capacity (host is always allowed in)
-    if (!isHost) {
+    if (!grantHost) {
       const limit   = Math.min(Math.max(parseInt(maxParticipants) || 300, 2), 500);
       const current = rooms.getAdmitted(meetingUuid).length + rooms.getWaiting(meetingUuid).length;
       if (current >= limit) {
@@ -19,7 +37,7 @@ function registerRoomHandlers(io, socket, rooms) {
     }
 
     // Lock check — block new participants; reconnects and co-host userIds are exempt
-    if (!isHost && rooms.isLocked(meetingUuid)) {
+    if (!grantHost && rooms.isLocked(meetingUuid)) {
       const wasAdmitted = userId && rooms.wasUserAdmitted(meetingUuid, userId);
       const isCoHostU   = userId && rooms.isCoHostUser(meetingUuid, userId);
       if (!wasAdmitted && !isCoHostU) {
@@ -30,7 +48,8 @@ function registerRoomHandlers(io, socket, rooms) {
     }
 
     // Host always admitted directly
-    if (isHost) {
+    if (grantHost) {
+      rooms.setHostSocketId(meetingUuid, socket.id);
       rooms.addAdmitted(meetingUuid, socket.id, info);
       socket.join(meetingUuid);
 
@@ -48,8 +67,11 @@ function registerRoomHandlers(io, socket, rooms) {
     }
 
     if (waitingRoom) {
-      // Reconnecting logged-in user who was previously admitted → skip waiting room
-      if (rooms.wasUserAdmitted(meetingUuid, userId)) {
+      // Reconnecting logged-in user who was previously admitted → skip waiting
+      // room, UNLESS another live connection for this same userId is already
+      // in the room (a simultaneous second device must still wait/be admitted).
+      const alreadyLiveElsewhere = rooms.hasLiveAdmittedUser(meetingUuid, userId, socket.id);
+      if (!alreadyLiveElsewhere && rooms.wasUserAdmitted(meetingUuid, userId)) {
         rooms.addAdmitted(meetingUuid, socket.id, info);
         socket.join(meetingUuid);
         const peers = rooms.getAdmitted(meetingUuid).filter(p => p.socketId !== socket.id);
