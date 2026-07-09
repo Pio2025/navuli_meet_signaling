@@ -252,6 +252,10 @@ function registerRoomHandlers(io, socket, rooms) {
     io.to(to).emit('unmute-request');
   });
 
+  socket.on('cam-off-request', ({ to }) => {
+    io.to(to).emit('cam-off-request');
+  });
+
   socket.on('poll-create', ({ pollId, question, options }) => {
     if (!socket.meetingUuid) return;
     const info = rooms.getAdmitted(socket.meetingUuid).find(p => p.socketId === socket.id);
