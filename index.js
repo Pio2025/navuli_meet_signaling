@@ -44,6 +44,7 @@ io.use((socket, next) => {
   try {
     const decoded = verifyToken(token);
     socket.user = decoded;
+    console.log(`[auth] OK ${socket.id} — ${decoded.guest_name ? 'guest:' + decoded.guest_name : 'user:' + decoded.user_id}`);
     next();
   } catch (err) {
     console.warn(`[auth] REJECTED ${socket.id} — ${err.message}`);
