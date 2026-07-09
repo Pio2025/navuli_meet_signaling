@@ -2,7 +2,7 @@ const backendApi = require('../services/backendApi');
 
 function registerChatHandlers(io, socket, rooms) {
 
-  socket.on('chat-message', ({ message, fileUrl, fileName, fileType, fileSize }) => {
+  socket.on('chat-message', ({ messageId, message, fileUrl, fileName, fileType, fileSize }) => {
     if (!socket.meetingUuid) return;
     const hasText = message?.trim();
     const hasFile = fileUrl?.trim();
@@ -14,6 +14,7 @@ function registerChatHandlers(io, socket, rooms) {
 
     const payload = {
       socketId:   socket.id,
+      messageId,
       senderName: info?.displayName ?? 'Guest',
       message:    safe,
       timestamp:  new Date().toISOString(),
@@ -33,6 +34,16 @@ function registerChatHandlers(io, socket, rooms) {
       attachment_name: hasFile ? fileName : undefined,
       attachment_mime: hasFile ? fileType : undefined,
       attachment_size: hasFile ? fileSize : undefined,
+    });
+  });
+
+  // Emoji reactions on a chat message — pure relay, keyed by the client-
+  // generated messageId shared in the 'chat-message' payload above. Not
+  // persisted (matches the existing poll relay's ephemeral-only model).
+  socket.on('chat-reaction', ({ messageId, emoji }) => {
+    if (!socket.meetingUuid || !messageId || !emoji) return;
+    socket.to(socket.meetingUuid).emit('chat-reaction-update', {
+      socketId: socket.id, messageId, emoji,
     });
   });
 
