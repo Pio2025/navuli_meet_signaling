@@ -3,9 +3,58 @@ const backendApi = require('../services/backendApi');
 function registerRoomHandlers(io, socket, rooms) {
 
   socket.on('join-room', ({ meetingUuid, userId, displayName, photoUrl, isHost, waitingRoom, maxParticipants }) => {
-    const info = { userId, displayName, photoUrl: photoUrl || '' };
+    // Identity is derived from the server-verified JWT (`socket.user`, set by
+    // the auth middleware in index.js before any handler runs), NOT from the
+    // client-supplied `userId` field — which is always 0 for guests and would
+    // otherwise make every guest reconnect indistinguishable from a fresh join.
+    const identityKey = (socket.user?.is_guest && socket.user?.guest_id)
+      ? `g:${socket.user.guest_id}`
+      : (socket.user?.user_id ? `u:${socket.user.user_id}` : null);
+
+    const info = { userId, displayName, photoUrl: photoUrl || '', identityKey };
     socket.meetingUuid  = meetingUuid;
     socket.currentRoom  = meetingUuid;  // updated when entering a breakout
+
+    // ── Reconnect fast-path ──────────────────────────────────────────────
+    // If this identity was already admitted into this meeting before (host
+    // or participant), this join is a reconnect — a dropped Wi-Fi, a tab
+    // refresh, a phone switching networks — not a new arrival. Evict
+    // whatever stale socket still holds that identity (it may still look
+    // "connected" to Socket.IO for up to `pingTimeout` after a real drop)
+    // and re-admit immediately, bypassing capacity/lock/waiting-room checks
+    // entirely and restoring host status if this identity was the host.
+    // This is what lets both hosts and participants (including guests)
+    // rejoin a live meeting instantly instead of landing back in the
+    // waiting room for the host to re-admit them.
+    if (identityKey && rooms.wasIdentityAdmitted(meetingUuid, identityKey)) {
+      const staleSocketId = rooms.findAdmittedByIdentity(meetingUuid, identityKey, socket.id);
+      if (staleSocketId) {
+        const staleSocket = io.sockets.sockets.get(staleSocketId);
+        if (staleSocket) {
+          staleSocket.emit('session-replaced');
+          staleSocket.disconnect(true);
+        }
+        rooms.remove(meetingUuid, staleSocketId);
+      }
+
+      const wasHostIdentity = rooms.getHostIdentity(meetingUuid) === identityKey;
+      rooms.addAdmitted(meetingUuid, socket.id, info);
+      socket.join(meetingUuid);
+      if (wasHostIdentity) {
+        rooms.setHostSocketId(meetingUuid, socket.id);
+      }
+
+      const peers = rooms.getAdmitted(meetingUuid).filter(p => p.socketId !== socket.id);
+      socket.emit('admitted', { peers });
+      socket.emit('meeting-lock-status', { locked: rooms.isLocked(meetingUuid) });
+      io.to(meetingUuid).except(socket.id).emit('peer-joined', {
+        socketId: socket.id, userId: info.userId, displayName: info.displayName, photoUrl: info.photoUrl,
+      });
+      const waiting = rooms.getWaiting(meetingUuid);
+      socket.emit('waiting-room-update', { waiting });
+      console.log(`[room] RECONNECTED   meeting=${meetingUuid}  name="${displayName}"  identity=${identityKey}  host=${wasHostIdentity}  peers=${peers.length}`);
+      return;
+    }
 
     // A client's `isHost` claim (computed statically server-side from
     // user_id == host_user_id, with no live-connection awareness) is only
@@ -36,11 +85,12 @@ function registerRoomHandlers(io, socket, rooms) {
       }
     }
 
-    // Lock check — block new participants; reconnects and co-host userIds are exempt
+    // Lock check — block new participants; co-host userIds are exempt
+    // (identity-based reconnects for previously-admitted people never reach
+    // this point — they already returned via the fast-path above).
     if (!grantHost && rooms.isLocked(meetingUuid)) {
-      const wasAdmitted = userId && rooms.wasUserAdmitted(meetingUuid, userId);
-      const isCoHostU   = userId && rooms.isCoHostUser(meetingUuid, userId);
-      if (!wasAdmitted && !isCoHostU) {
+      const isCoHostU = userId && rooms.isCoHostUser(meetingUuid, userId);
+      if (!isCoHostU) {
         socket.emit('meeting-locked');
         console.log(`[room] LOCKED        meeting=${meetingUuid}  name="${displayName}"`);
         return;
@@ -50,6 +100,7 @@ function registerRoomHandlers(io, socket, rooms) {
     // Host always admitted directly
     if (grantHost) {
       rooms.setHostSocketId(meetingUuid, socket.id);
+      if (identityKey) rooms.setHostIdentity(meetingUuid, identityKey);
       rooms.addAdmitted(meetingUuid, socket.id, info);
       socket.join(meetingUuid);
 
@@ -67,25 +118,6 @@ function registerRoomHandlers(io, socket, rooms) {
     }
 
     if (waitingRoom) {
-      // Reconnecting logged-in user who was previously admitted → skip waiting
-      // room, UNLESS another live connection for this same userId is already
-      // in the room (a simultaneous second device must still wait/be admitted).
-      const alreadyLiveElsewhere = rooms.hasLiveAdmittedUser(meetingUuid, userId, socket.id);
-      if (!alreadyLiveElsewhere && rooms.wasUserAdmitted(meetingUuid, userId)) {
-        rooms.addAdmitted(meetingUuid, socket.id, info);
-        socket.join(meetingUuid);
-        const peers = rooms.getAdmitted(meetingUuid).filter(p => p.socketId !== socket.id);
-        socket.emit('admitted', { peers });
-        socket.emit('meeting-lock-status', { locked: rooms.isLocked(meetingUuid) });
-        io.to(meetingUuid).except(socket.id).emit('peer-joined', {
-          socketId: socket.id, userId: info.userId, displayName: info.displayName, photoUrl: info.photoUrl,
-        });
-        const waiting = rooms.getWaiting(meetingUuid);
-        socket.emit('waiting-room-update', { waiting });
-        console.log(`[room] RECONNECTED   meeting=${meetingUuid}  name="${displayName}"  peers=${peers.length}`);
-        return;
-      }
-
       // New participant — hold in waiting room
       rooms.joinWaiting(meetingUuid, socket.id, info);
       const waiting = rooms.getWaiting(meetingUuid);

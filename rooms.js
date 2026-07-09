@@ -2,17 +2,24 @@
 
 const state = {};
 // state[meetingUuid] = {
-//   admitted:       Map<socketId, { userId, displayName, sfuSessionId?, sfuTrackNames? }>
-//   waiting:        Map<socketId, { userId, displayName }>
-//   admittedUserIds: Set<string>  — logged-in userIds ever admitted (for fast reconnect)
+//   admitted:           Map<socketId, { userId, displayName, identityKey?, sfuSessionId?, sfuTrackNames? }>
+//   waiting:            Map<socketId, { userId, displayName, identityKey? }>
+//   admittedIdentities: Set<string>  — identity keys ('u:<userId>' / 'g:<guestId>') ever
+//                        admitted, derived server-side from the JWT (never the client-
+//                        supplied userId, which is always 0 for guests) — used for
+//                        reliable reconnects for both registered users AND guests.
+//   hostIdentity:       identity key of whoever last held the live host slot, so a
+//                        reconnecting host session is recognized and re-granted host
+//                        status instead of falling through to the participant path.
 // }
 
 function getRoom(meetingUuid) {
   if (!state[meetingUuid]) {
     state[meetingUuid] = {
-      admitted:        new Map(),
-      waiting:         new Map(),
-      admittedUserIds: new Set(),
+      admitted:           new Map(),
+      waiting:            new Map(),
+      admittedIdentities: new Set(),
+      hostIdentity:       null,
       hostSocketId:    null,
       locked:          false,
       cohostSocketIds: new Set(),
@@ -47,7 +54,7 @@ function admit(meetingUuid, socketId) {
   if (!info) return null;
   room.waiting.delete(socketId);
   room.admitted.set(socketId, info);
-  if (info.userId && info.userId !== 0) room.admittedUserIds.add(String(info.userId));
+  if (info.identityKey) room.admittedIdentities.add(info.identityKey);
   return info;
 }
 
@@ -56,7 +63,7 @@ function admitAll(meetingUuid) {
   const admitted = [];
   room.waiting.forEach((info, sid) => {
     room.admitted.set(sid, info);
-    if (info.userId && info.userId !== 0) room.admittedUserIds.add(String(info.userId));
+    if (info.identityKey) room.admittedIdentities.add(info.identityKey);
     admitted.push({ socketId: sid, ...info });
   });
   room.waiting.clear();
@@ -66,26 +73,36 @@ function admitAll(meetingUuid) {
 function addAdmitted(meetingUuid, socketId, info) {
   const room = getRoom(meetingUuid);
   room.admitted.set(socketId, info);
-  if (info.userId && info.userId !== 0) room.admittedUserIds.add(String(info.userId));
+  if (info.identityKey) room.admittedIdentities.add(info.identityKey);
 }
 
-function wasUserAdmitted(meetingUuid, userId) {
-  if (!userId || userId === 0 || userId === '0') return false;
+function wasIdentityAdmitted(meetingUuid, identityKey) {
+  if (!identityKey) return false;
   const room = getRoom(meetingUuid);
-  return room.admittedUserIds.has(String(userId));
+  return room.admittedIdentities.has(identityKey);
 }
 
-// True if `userId` currently has a live admitted connection under a
-// different socket — used to stop a second simultaneous device/tab for the
-// same account from riding the "reconnect" shortcut past the waiting room.
-function hasLiveAdmittedUser(meetingUuid, userId, excludeSocketId) {
-  if (!userId || userId === 0 || userId === '0') return false;
+// Finds the socketId currently holding an admitted connection for `identityKey`
+// (excluding `excludeSocketId`) — used on reconnect to locate and evict the
+// stale session, which may still look "connected" from Socket.IO's own
+// perspective for up to `pingTimeout` after a real network drop.
+function findAdmittedByIdentity(meetingUuid, identityKey, excludeSocketId) {
+  if (!identityKey) return null;
   const room = state[meetingUuid];
-  if (!room) return false;
+  if (!room) return null;
   for (const [sid, info] of room.admitted.entries()) {
-    if (sid !== excludeSocketId && String(info.userId) === String(userId)) return true;
+    if (sid !== excludeSocketId && info.identityKey === identityKey) return sid;
   }
-  return false;
+  return null;
+}
+
+function getHostIdentity(meetingUuid) {
+  return state[meetingUuid]?.hostIdentity ?? null;
+}
+
+function setHostIdentity(meetingUuid, identityKey) {
+  const room = getRoom(meetingUuid);
+  room.hostIdentity = identityKey;
 }
 
 // Tracks which single socket currently holds the live "host" slot for a
@@ -144,7 +161,7 @@ function leaveAll(socketId, callback) {
       room.waiting.delete(socketId);
       if (room.hostSocketId === socketId) room.hostSocketId = null;
       callback(meetingUuid, info.displayName);
-      // Clean up empty rooms (keep admittedUserIds alive until host ends meeting)
+      // Clean up empty rooms (keep admittedIdentities alive until host ends meeting)
       if (room.admitted.size === 0 && room.waiting.size === 0) {
         delete state[meetingUuid];
       }
@@ -280,7 +297,8 @@ function clearWbStrokes(meetingUuid) {
 module.exports = {
   getRoom, joinWaiting, admit, admitAll, addAdmitted, getAdmitted,
   getWaiting, remove, leaveAll, destroyRoom, setSfuSession,
-  dropToWaiting, wasUserAdmitted, hasLiveAdmittedUser,
+  dropToWaiting, wasIdentityAdmitted, findAdmittedByIdentity,
+  getHostIdentity, setHostIdentity,
   getHostSocketId, setHostSocketId, clearHostSocketId,
   isLocked, setLocked, addCoHost, removeCoHost, isCoHost, isCoHostUser, getCoHosts,
   // Breakout
