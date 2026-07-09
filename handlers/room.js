@@ -214,7 +214,7 @@ function registerRoomHandlers(io, socket, rooms) {
     }
 
     // Notify remaining room members
-    io.to(socket.meetingUuid).emit('peer-left', { socketId, displayName: info.displayName });
+    io.to(socket.meetingUuid).emit('peer-left', { socketId, displayName: info.displayName, intentional: true });
 
     // Refresh waiting list for host
     const waiting = rooms.getWaiting(socket.meetingUuid);
@@ -235,7 +235,7 @@ function registerRoomHandlers(io, socket, rooms) {
       s.emit('removed-from-meeting');
       s.leave(socket.meetingUuid);
     }
-    io.to(socket.meetingUuid).emit('peer-left', { socketId, displayName: info?.displayName || 'Participant' });
+    io.to(socket.meetingUuid).emit('peer-left', { socketId, displayName: info?.displayName || 'Participant', intentional: true });
 
     // Refresh waiting list in case they were in waiting
     const waiting = rooms.getWaiting(socket.meetingUuid);
@@ -292,7 +292,8 @@ function registerRoomHandlers(io, socket, rooms) {
 
   socket.on('end-meeting', () => {
     if (socket.meetingUuid) {
-      socket.to(socket.meetingUuid).emit('meeting-ended');
+      const info = rooms.getAdmitted(socket.meetingUuid).find(p => p.socketId === socket.id);
+      socket.to(socket.meetingUuid).emit('meeting-ended', { hostName: info?.displayName || 'The host' });
     }
   });
   

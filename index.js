@@ -69,6 +69,11 @@ io.on('connection', (socket) => {
     if (socket.meetingUuid) {
       backendApi.leave(socket.handshake.auth?.token, socket.meetingUuid);
     }
+    // 'io client disconnect' means the client called socket.disconnect()
+    // itself (Leave Meeting / End Meeting) — a deliberate departure, not a
+    // dropped connection. Any other reason (transport close, ping timeout,
+    // transport error) is a real connectivity drop worth flagging as such.
+    const intentional = reason === 'io client disconnect';
     rooms.leaveAll(socket.id, (meetingUuid, displayName) => {
       // Use io.to().except() — socket.to() is unreliable here because Socket.IO
       // calls socket.leaveAll() before firing the disconnect event, so the socket
@@ -76,6 +81,7 @@ io.on('connection', (socket) => {
       io.to(meetingUuid).except(socket.id).emit('peer-left', {
         socketId: socket.id,
         displayName,
+        intentional,
       });
     });
   });
